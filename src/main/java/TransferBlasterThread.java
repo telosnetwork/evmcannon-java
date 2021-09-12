@@ -7,7 +7,7 @@ import org.web3j.utils.Async;
 import org.web3j.utils.Convert;
 
 import java.math.BigDecimal;
-import java.util.logging.Level;
+import java.time.Instant;
 import java.util.logging.Logger;
 
 public class TransferBlasterThread extends Thread {
@@ -30,6 +30,14 @@ public class TransferBlasterThread extends Thread {
 		while (true) {
 			Transfer transfer = new Transfer(gWeb3, gTrxMgr);
 			try {
+				if (gCannon.getRunEvery() > 0) {
+					long now = Instant.now().getEpochSecond();
+					long remainder = now % gCannon.getRunEvery();
+					long runAgain = gCannon.getRunEvery() - remainder;
+					if (runAgain > 0)
+						Thread.sleep(runAgain * 1000);
+				}
+
 				TransactionReceipt transactionReceipt = transfer.sendFunds(gToAddress, new BigDecimal("1"), Convert.Unit.WEI).send();
 				transactionReceipt.getBlockHash();
 				gCannon.countTransaction(transactionReceipt.getBlockNumberRaw());

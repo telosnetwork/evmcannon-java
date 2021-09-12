@@ -35,6 +35,7 @@ public class EVMCannon {
 
 	private String gRpcUrl;
 	private Web3j gWeb3;
+	private long gRunEvery = 0;
 	private TransactionManager gRootTrxMgr;
 	private Credentials gRootCredentials;
 	private int gNumBlasters;
@@ -44,25 +45,36 @@ public class EVMCannon {
 	private Map<String, AtomicInteger> gBlockMap = new ConcurrentHashMap<>();
 	
 	private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
-	private static final BigDecimal SPLIT_MULTIPLIER = new BigDecimal(".03");
-	private static final int DELAY_MS = 250;
+	private static final int POLLING_INTERVAL = 250;
 	
-	public EVMCannon(String rpcUrl, String privateKey, int numBlasters) throws IOException {
+	public EVMCannon(String rpcUrl, String privateKey, int numBlsters, String percent) throws IOException {
 		System.setProperty("java.util.logging.SimpleFormatter.format", "[%1$tF %1$tT] [%4$-7s] %5$s %n");
 		gRpcUrl = rpcUrl;
-		gWeb3 = Web3j.build(new HttpService(rpcUrl), DELAY_MS, Async.defaultExecutorService());
+		gWeb3 = Web3j.build(new HttpService(rpcUrl), POLLING_INTERVAL, Async.defaultExecutorService());
 		gRootCredentials = Credentials.create(privateKey);
-		gRootTrxMgr = new FastRawTransactionManager(gWeb3, gRootCredentials, new PollingTransactionReceiptProcessor(gWeb3, DELAY_MS, 40));
-		gNumBlasters = numBlasters;
+		gRootTrxMgr = new FastRawTransactionManager(gWeb3, gRootCredentials, new PollingTransactionReceiptProcessor(gWeb3, POLLING_INTERVAL, 40));
+		gNumBlasters = numBlsters;
+		BigDecimal splitMultipliper = new BigDecimal(percent);
+		System.out.println("Cannon running against RPC: " + rpcUrl + " using " + numBlsters + " threads and sending " + percent + "% of it's funds");
+		System.out.println("splitMultiplier is " + splitMultipliper);
 		EthGetBalance balance = gWeb3.ethGetBalance(gRootCredentials.getAddress(), DefaultBlockParameterName.LATEST).send();
-		gTLOSPerBlaster = SPLIT_MULTIPLIER.multiply(new BigDecimal(balance.getBalance()).divide(new BigDecimal(gNumBlasters), 2, RoundingMode.HALF_UP));
+		System.out.println("balance is " + balance.getBalance());
+		gTLOSPerBlaster = splitMultipliper.multiply(new BigDecimal(balance.getBalance()).divide(new BigDecimal(gNumBlasters), 2, RoundingMode.HALF_UP));
 	}
-	
+
+	public void setRunEvery(int secs) {
+		gRunEvery = secs;
+	}
+
+	public long getRunEvery() {
+		return gRunEvery;
+	}
+
 	public void initializeAccounts() throws Exception {
 		for (int i = 0; i < gNumBlasters; i++) {
-			Web3j web3j = Web3j.build(new HttpService(gRpcUrl, makeHttpClient()), DELAY_MS, Async.defaultExecutorService());
+			Web3j web3j = Web3j.build(new HttpService(gRpcUrl, makeHttpClient()), POLLING_INTERVAL, Async.defaultExecutorService());
 			Credentials cred = Credentials.create(makeKeyPair());
-			TransactionManager trxMgr = new FastRawTransactionManager(web3j, cred, new PollingTransactionReceiptProcessor(web3j, DELAY_MS, 40));
+			TransactionManager trxMgr = new FastRawTransactionManager(web3j, cred, new PollingTransactionReceiptProcessor(web3j, POLLING_INTERVAL, 40));
 			gAddresses.put(cred, trxMgr);
 			Transfer transfer = new Transfer(gWeb3, gRootTrxMgr);
 			TransactionReceipt receipt = transfer.sendFunds(cred.getAddress(), gTLOSPerBlaster.setScale(0, RoundingMode.FLOOR), Convert.Unit.WEI).send();
@@ -73,7 +85,7 @@ public class EVMCannon {
 	public void blast() {
 		List<Thread> threads = Lists.newArrayList();
 		gAddresses.forEach((Credentials cred, TransactionManager trxMgr) -> {
-			TransferBlasterThread t = new TransferBlasterThread(this, gRpcUrl, DELAY_MS, trxMgr, gRootCredentials.getAddress());
+			TransferBlasterThread t = new TransferBlasterThread(this, gRpcUrl, POLLING_INTERVAL, trxMgr, gRootCredentials.getAddress());
 			t.start();
 			threads.add(t);
 		});
